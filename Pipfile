@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+gradio = "*"
+opencv-python = "*"
+streamlit = "*"
+ipykernel = "*"
+moviepy = "*"
+pandas = "*"
+asyncio = "*"
+aiohttp = "*"
+stqdm = "*"
+joblib = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"
