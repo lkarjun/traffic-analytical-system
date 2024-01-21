@@ -1,24 +1,48 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from detect import DetectCars
+from detect import DetectCars, DetectEngine
+from pathlib import Path
 
 
+engine = DetectEngine(endpoint_url=None)
 
-# st.set_page_config(layout="wide")
-
-uploaded_file = st.file_uploader("Choose video file...")
-
-
+ASSESTS = Path(__file__).resolve().parent / 'assets'
+demo_files = {i.name: i for i in list(ASSESTS.glob("*.mp4"))}
 
 
-if uploaded_file:
+body = """
+<h1> Mini Project </h1> <br>
+<h5> Lal Krishna Arjun K </h5>
+<h5> AA.SC.P2MCA2207077 </h5>
+<h5> Topic:  Robust Car Detection and Directional Analysis in Noisy Video Environments</h5>
+<br>
+"""
+st.markdown(body=body, unsafe_allow_html=True)
+
+
+upload_options = st.selectbox(
+    'Choose video file...', ['-'] + list(demo_files.keys()) + ['Upload a File']
+)
+if upload_options == 'Upload a File':
+    uploaded_file = st.file_uploader("Choose video file...")
+    video_bytes = uploaded_file.read() if uploaded_file else None
+elif upload_options == '-': video_bytes = False
+else:
+    video_bytes = demo_files[upload_options].read_bytes() 
+
+
+if video_bytes:
     
     with st.status("Analysing Video", expanded=True) as status:
         st.write("Extracting frames...")
-        detection = DetectCars(uploaded_file)
-        st.write(f"{detection.video_hash=} {detection.is_cached=}")
+        detection = DetectCars(video_bytes, engine=engine)
+        st.write(f"{detection.is_cached=}")
         detection.get_frames()
+
+        st.write("Detecting cars in frames...")
+        detection.detect_cars_in_frames()
+
         st.write("Saving processed frames...")
         video_bytes = detection.get_processed_video()
 

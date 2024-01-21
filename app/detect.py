@@ -23,49 +23,118 @@ def generate_video_hash(video_bytes, hash_algorithm='sha256'):
 
 
 @dataclass
-class ModelResults:
+class Result:
     image: np.ndarray
     image_with_bbox: np.ndarray | None = None
-    xyxy_points: list | None = None
+    xyxy: list | None = None
+    confidences: float | None = None
+    class_id: int | None = None
 
-    
 
-def detect_cars(frames: list[np.ndarray], endpoint_url: str) -> dict[int, ModelResults]:
-    results = {}
-    for i, image in stqdm(enumerate(frames), total=len(frames)):
-        _, img_encoded = cv2.imencode(".jpg", image)
+    def to_tensor_format(self) -> np.ndarray:
+        stacked_array = np.hstack(
+            (
+                self.xyxy,
+                self.confidence[:, np.newaxis],
+                self.class_id[:, np.newaxis],
+            )
+        )
+        return stacked_array
+
+
+
+class DetectEngine:
+
+    def __init__(self, endpoint_url: str | None = None) -> None:
+        if endpoint_url: 
+            print("Using requests Engine...")
+            self.engine = self._request_engine
+        else:
+            print("Using model Engine...")
+            print("Loading openvino model...")
+            from ultralytics import YOLO
+            model_path = ROOT_PATH / "yolov8n_openvino_model"
+            self.model = YOLO(model_path, task="detect")
+            print("Loaded openvino model...")
+            self.engine = self._model_engine
+
+    def _request_engine(self, modelresult: Result) -> dict:
+        _, img_encoded = cv2.imencode(".jpg", modelresult.image)
         image_bytes = img_encoded.tobytes()
         files = {"file": image_bytes}
-        response = requests.post(endpoint_url, files=files)
-        assert response.ok, "Failed to detect image..."
-        results[i] = ModelResults(
-            image=image, xyxy_points=response.json()
-        )
-    return results
+        response = requests.post(self.endpoint_url, files=files)
+        assert response.ok
+        result = response.json()
+        return result
+    
+    def _model_engine(self, modelresult: Result) -> dict:
+        [result] = self.model(modelresult.image, classes=[2], conf=0.1)
+        xyxy = result.boxes.xyxy.cpu().numpy()
+        confidences =result.boxes.conf.cpu().numpy()
+        class_id = result.boxes.cls.cpu().numpy().astype(int)
+        return dict(xyxy=xyxy, confidences=confidences, class_id=class_id)
+    
+    def __call__(self, modelresult: Result) -> dict:
+        return self.engine(modelresult)
 
 
 
 class DetectCars:
-    def __init__(self, video_file, endpoint_url="") -> None:
-        self.video_bytes = video_file.read()
-        self.endpoint_url = endpoint_url
+    def __init__(self, video_bytes, engine: DetectEngine) -> None:
+        self.engine = engine
+        self.video_bytes = video_bytes
         self.video_hash = generate_video_hash(self.video_bytes)
 
-        self.is_cached = (ROOT_PATH / self.video_hash).exists()
-
+        self.is_cached = (CACHE_FOLDER / self.video_hash).exists()
+        if self.is_cached: self.load_cache()
 
 
     def detect_cars_in_frames(self):
-        for i, modelresult in stqdm(self.frames.items(), leave=False, desc="Saving processed frames..."): 
-            _, img_encoded = cv2.imencode(".jpg", modelresult.image)
-            image_bytes = img_encoded.tobytes()
-            files = {"file": image_bytes}
-            response = requests.post(self.endpoint_url, files=files)
-            assert response.ok, "Failed to detect image..."
-            self.frames[i].xyxy_points = response.json()
+        if self.is_cached: return 
+        for i, modelresult in stqdm(self.frames.items(), leave=False, desc="Detecting cars in frames..."): 
+            try:
+                result = self.engine(modelresult=modelresult)
+                self.frames[i].xyxy = result['xyxy']
+                self.frames[i].confidences = result['confidences']
+                self.frames[i].class_id = result['class_id']
+                self.frames[i].image_wtih_bbox = self.draw_bbox(
+                    xyxy_points=self.frames[i].xyxy, 
+                    image=self.frames[i].image.copy()
+                )
+            except Exception as e:
+                print(f"Failed to process frame {i}")
+                return 
+        self.create_cache()
+
+
+    def create_cache(self):
+        cache_data = {
+            "fps": self.fps,
+            "size": self.size,
+            "frames": self.frames
+        }
+        joblib.dump(cache_data, CACHE_FOLDER / self.video_hash)
+
+    def load_cache(self):
+        cache_data = joblib.load(CACHE_FOLDER / self.video_hash)    
+        self.fps = cache_data['fps']
+        self.size = cache_data['size']
+        self.frames = cache_data['frames']
+
         
+    def draw_bbox(self, xyxy_points: list, image):
+        for xyxy in xyxy_points:
+            p1 = (int(xyxy[0]), int(xyxy[1]))
+            p2 = (int(xyxy[2]), int(xyxy[3]))
+            image = cv2.rectangle(
+                image, p1, p2, (255, 0, 0), thickness=2, lineType=cv2.LINE_AA
+            )
+        return image
+
 
     def get_frames(self) -> None:
+        if self.is_cached: return 
+
         with tempfile.NamedTemporaryFile(delete=True) as temp_file:
             temp_file.write(self.video_bytes)
             cap = cv2.VideoCapture(temp_file.name)
@@ -83,7 +152,7 @@ class DetectCars:
             cap.release()
 
         frames = {
-            i: ModelResults(image=image)
+            i: Result(image=image)
             for i, image in enumerate(frames)    
         }
         self.frames, self.fps, self.size = frames, fps, size
@@ -98,80 +167,11 @@ class DetectCars:
             video_writer = cv2.VideoWriter(str(out_filename), fourcc, self.fps, self.size)
 
             for _, modelresult in stqdm(self.frames.items(), leave=False, desc="Saving processed frames..."): 
-                frame = modelresult.image_with_bbox if modelresult.image_with_bbox else modelresult.image
+                frame = modelresult.image_with_bbox if modelresult.image_with_bbox is not None else modelresult.image
                 video_writer.write(frame)
             video_writer.release()
 
             with open(out_filename, "rb") as fp:
                 video_bytes = fp.read()
         return video_bytes
-
-
-# async def get_model_result(
-#         session: aiohttp.ClientSession, semaphore: asyncio.Semaphore, frames: dict, idx: int, url: str
-#     ) -> None:
-
-#     image = frames[idx].image
-#     _, img_encoded = cv2.imencode(".jpg", image)
-#     image_bytes = img_encoded.tobytes()
-#     async with semaphore, session.post(url, data={"file": image_bytes}) as response:
-#         result = await response.json() if response.status == 200 else None
-#         frames[idx].xyxy_points = result
-
-
-# async def detect_cars(frames: list[np.ndarray], endpoint_url: str, max_concurrent_uploads=2):
-#     frames = {
-#         i: ModelResults(image=image) for i, image in enumerate(frames)
-#     }
-
-#     semaphore = asyncio.Semaphore(max_concurrent_uploads)
-
-#     async with aiohttp.ClientSession() as session:
-#         tasks = [
-#             get_model_result(
-#                 session, semaphore, frames=frames, idx=idx, url=endpoint_url
-#             ) 
-#             for idx in frames.keys()
-#         ]
-#         await asyncio.gather(*tasks)
-#     return frames
-
-
-
-# if __name__ == "__main__":
-#     from tqdm import tqdm
-#     endpoint_url = 'https://a6e8-34-67-97-119.ngrok-free.app?conf=0.1'
-
-#     # image = cv2.imread("../traffic_signal.jpg")
-#     # print(detect_cars(image=image, endpoint_url=endpoint_url))
-
-#     cap = cv2.VideoCapture("RoadTraffic.mp4")
-#     fps = cap.get(cv2.CAP_PROP_FPS)
-#     frame_width = int(cap.get(3)) 
-#     frame_height = int(cap.get(4)) 
-#     size = (frame_width, frame_height) 
-    
-#     frames = []
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret: break
-#         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-#         frames.append(frame)
-#     cap.release()
-
-#     # frames = asyncio.run(detect_cars(frames=frames, endpoint_url=endpoint_url))
-
-#     print(len(frames))
-#     total = 0
-#     for frame in tqdm(frames):
-#         try:
-#             detect_cars(frame, endpoint_url=endpoint_url)
-#             total += 1
-#         except Exception as e:
-#             print(str(e))
-#         # if frame.xyxy_points:
-
-#         #     total += 1
-    
-#     print(f"{total=} {len(frames)=}")
 
