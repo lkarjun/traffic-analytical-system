@@ -45,16 +45,18 @@ class Result:
 
 class DetectEngine:
 
-    def __init__(self, endpoint_url: str | None = None) -> None:
+    def __init__(self, endpoint_url: str | None = None, conf: float = 0.5) -> None:
         if endpoint_url: 
             print("Using requests Engine...")
             self.engine = self._request_engine
+            self.endpoint_url = f"{endpoint_url}?{conf=}"
         else:
             print("Using model Engine...")
             print("Loading openvino model...")
             from ultralytics import YOLO
             model_path = ROOT_PATH / "yolov8n_openvino_model"
             self.model = YOLO(model_path, task="detect")
+            self.conf = conf
             print("Loaded openvino model...")
             self.engine = self._model_engine
 
@@ -68,7 +70,7 @@ class DetectEngine:
         return result
     
     def _model_engine(self, modelresult: Result) -> dict:
-        [result] = self.model(modelresult.image, classes=[2], conf=0.1)
+        [result] = self.model(modelresult.image, classes=[2], conf=self.conf)
         xyxy = result.boxes.xyxy.cpu().numpy()
         confidences =result.boxes.conf.cpu().numpy()
         class_id = result.boxes.cls.cpu().numpy().astype(int)
