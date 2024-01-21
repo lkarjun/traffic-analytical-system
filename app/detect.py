@@ -35,7 +35,7 @@ class Result:
         stacked_array = np.hstack(
             (
                 self.xyxy,
-                self.confidence[:, np.newaxis],
+                self.confidences[:, np.newaxis],
                 self.class_id[:, np.newaxis],
             )
         )
