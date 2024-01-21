@@ -45,7 +45,7 @@ class Result:
 
 class DetectEngine:
 
-    def __init__(self, endpoint_url: str | None = None, conf: float = 0.5) -> None:
+    def __init__(self, endpoint_url: str | None = None, conf: float = 0.5, model_variant: str = 'm') -> None:
         if endpoint_url: 
             print("Using requests Engine...")
             self.engine = self._request_engine
@@ -54,7 +54,7 @@ class DetectEngine:
             print("Using model Engine...")
             print("Loading openvino model...")
             from ultralytics import YOLO
-            model_path = ROOT_PATH / "yolov8n_openvino_model"
+            model_path = ROOT_PATH / f"model/yolov8{model_variant}_openvino_model"
             self.model = YOLO(model_path, task="detect")
             self.conf = conf
             print("Loaded openvino model...")
@@ -99,7 +99,7 @@ class DetectCars:
                 self.frames[i].xyxy = result['xyxy']
                 self.frames[i].confidences = result['confidences']
                 self.frames[i].class_id = result['class_id']
-                self.frames[i].image_wtih_bbox = self.draw_bbox(
+                self.frames[i].image_with_bbox = self.draw_bbox(
                     xyxy_points=self.frames[i].xyxy, 
                     image=self.frames[i].image.copy()
                 )
@@ -170,6 +170,7 @@ class DetectCars:
 
             for _, modelresult in stqdm(self.frames.items(), leave=False, desc="Saving processed frames..."): 
                 frame = modelresult.image_with_bbox if modelresult.image_with_bbox is not None else modelresult.image
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) 
                 video_writer.write(frame)
             video_writer.release()
 

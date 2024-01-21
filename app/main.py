@@ -5,7 +5,7 @@ from detect import DetectCars, DetectEngine
 from pathlib import Path
 
 
-engine = DetectEngine(endpoint_url=None)
+engine = DetectEngine(endpoint_url=None, model_variant='m')
 
 ASSESTS = Path(__file__).resolve().parent / 'assets'
 demo_files = {i.name: i for i in list(ASSESTS.glob("*.mp4"))}
