@@ -8,12 +8,12 @@ gradio = "*"
 opencv-python = "*"
 streamlit = "*"
 ipykernel = "*"
-moviepy = "*"
-pandas = "*"
 asyncio = "*"
 aiohttp = "*"
 stqdm = "*"
 joblib = "*"
+ultralytics = "*"
+supervision = "*"
 
 [dev-packages]
 
