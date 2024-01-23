@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from detect import DetectCars, DetectEngine
+from detect import DetectCars, DetectEngine, Tracker
 from pathlib import Path
 
 
@@ -12,10 +12,10 @@ demo_files = {i.name: i for i in list(ASSESTS.glob("*.mp4"))}
 
 
 body = """
-<h1> Mini Project </h1> <br>
+<h1> Robust Car Detection and Directional Analysis </h1> <br>
 <h5> Lal Krishna Arjun K </h5>
 <h5> AA.SC.P2MCA2207077 </h5>
-<h5> Topic:  Robust Car Detection and Directional Analysis in Noisy Video Environments</h5>
+<h5> Mini Project </h5>
 <br>
 """
 st.markdown(body=body, unsafe_allow_html=True)
@@ -32,9 +32,9 @@ else:
     video_bytes = demo_files[upload_options].read_bytes() 
 
 
-if video_bytes:
+if video_bytes and st.button("Start"):
     
-    with st.status("Analysing Video", expanded=True) as status:
+    with st.status("Processing Video", expanded=True) as status:
         st.write("Extracting frames...")
         detection = DetectCars(video_bytes, engine=engine)
         st.write(f"{detection.is_cached=}")
@@ -50,22 +50,19 @@ if video_bytes:
     
 
 
+    with st.status("Analysing Video", expanded=True) as status:
+        st.write("Tracking individual cars...")
+        tracker = Tracker(frame_rate=detection.fps)
+        st.write("Analysing directions...")
+        tracker.analyse(detection.frames)
+        result_df = tracker.get_analysed_result()
+        status.update(label="Analysed", state="complete", expanded=False)
+
     col1, col2 = st.columns([2, 3])
     with col1:
+   
         st.header("Video stats", divider="rainbow")
-
-        df = pd.DataFrame.from_dict({
-            "index": [
-                "Number of cars", 
-                "Moving on left direction", 
-                "Moving on right direction",
-                "Moving on upward direction",
-                "Moving on downward direction"
-            ],
-            "values": [3, 4, 2, 2, 1]
-        })
-        df = df.set_index('index')
-        st.table(df)
+        st.table(result_df)
 
     with col2:
         st.header("Processed video", divider="rainbow")

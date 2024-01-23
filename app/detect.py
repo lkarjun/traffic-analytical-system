@@ -178,3 +178,60 @@ class DetectCars:
                 video_bytes = fp.read()
         return video_bytes
 
+
+
+
+import pandas as pd
+import supervision as sv
+from collections import defaultdict
+
+class Tracker:
+
+    def __init__(self, **tracker_kw):
+        self.tracker = sv.ByteTrack(**tracker_kw)
+
+    def analyse(self, frames: dict[int, Result]):
+        track_result = defaultdict(list)
+        for i, res in stqdm(frames.items(), leave=False, desc="Analysing..."):
+            tracks = self.tracker.update_with_tensors(res.to_tensor_format())
+            track_ids = [track.track_id for track in tracks]
+
+            track_result['frame_id'].extend([i] * len(track_ids))
+            track_result['track_id'].extend(track_ids)
+            track_result['track_xyxy'].extend(
+                list(track.tlbr.astype(int))
+                for track in tracks
+            )
+        self.result_df = pd.DataFrame(track_result)
+
+
+    def get_analysed_result(self) -> pd.DataFrame:
+        total_cars = self.result_df.track_id.nunique()
+
+        # TODO, impletement this
+        moving_to_right = 0
+        moving_to_left = 0
+        moving_to_upward = 0
+        moving_to_downward = 0
+
+        result_df = pd.DataFrame.from_dict({
+            "index": [
+                "Number of cars", 
+                "Moving on left direction", 
+                "Moving on right direction",
+                "Moving on upward direction",
+                "Moving on downward direction"
+            ],
+            "values": [
+                total_cars, 
+                moving_to_left, 
+                moving_to_right, 
+                moving_to_upward,
+                moving_to_downward, 
+                
+            ]
+        })
+
+        result_df = result_df.set_index('index')
+
+        return result_df
