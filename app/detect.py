@@ -183,7 +183,7 @@ class DetectCars:
 
 import pandas as pd
 import supervision as sv
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 class Tracker:
 
@@ -203,6 +203,14 @@ class Tracker:
                 for track in tracks
             )
         self.result_df = pd.DataFrame(track_result)
+        self.result_df['direction'] = self.result_df.apply(
+            self.get_directions, axis=1
+        )
+        direction_result = self.result_df.groupby(
+            "track_id", group_keys=True
+        ).apply(lambda x: x['direction'].mode()).to_dict()
+        direction_result = {k[0]: v for k, v in direction_result.items()}
+        self.direction_result = Counter(direction_result.values())
 
 
     def get_analysed_result(self) -> pd.DataFrame:
@@ -210,28 +218,55 @@ class Tracker:
 
         # TODO, impletement this
         moving_to_right = 0
-        moving_to_left = 0
-        moving_to_upward = 0
-        moving_to_downward = 0
+        moving_to_left = self.direction_result.get("left", 0)
+        moving_to_upward = self.direction_result.get("up", 0) +  self.direction_result.get("right", 0)
+        moving_to_downward = self.direction_result.get("down", 0)
 
         result_df = pd.DataFrame.from_dict({
             "index": [
-                "Number of cars", 
-                "Moving on left direction", 
-                "Moving on right direction",
-                "Moving on upward direction",
+                "Number of cars", "Moving on left direction", 
+                "Moving on right direction", "Moving on upward direction",
                 "Moving on downward direction"
             ],
             "values": [
-                total_cars, 
-                moving_to_left, 
-                moving_to_right, 
-                moving_to_upward,
-                moving_to_downward, 
-                
+                total_cars, moving_to_left, moving_to_right, 
+                moving_to_upward, moving_to_downward, 
             ]
         })
-
         result_df = result_df.set_index('index')
-
         return result_df
+    
+
+    def calculate_centroid(self, bbox):
+        x, y, w, h = bbox
+        return (x + w // 2, y + h // 2)
+    
+
+    def determine_direction(self, bbox1, bbox2):
+        centroid1 = np.array(self.calculate_centroid(bbox1))
+        centroid2 = np.array(self.calculate_centroid(bbox2))
+        direction_vector = centroid2 - centroid1
+        if np.abs(direction_vector[0]) > np.abs(direction_vector[1]):
+            if direction_vector[0] > 0:
+                return "right"
+            else:
+                return "left"
+        else:
+            if direction_vector[1] > 0:
+                return "down"
+            else:
+                return "up"
+            
+    def get_directions(self, row):
+        next_frame_num = row['frame_id'] + 1
+        next_frame_row = self.result_df[
+            (self.result_df['frame_id'] == next_frame_num) 
+            & 
+            (self.result_df['track_id'] == row['track_id'])
+        ]
+        if next_frame_row.empty: return
+        next_frame_row= next_frame_row.iloc[0]
+        direction = self.determine_direction(
+            row.track_xyxy, next_frame_row.track_xyxy
+        )
+        return direction
