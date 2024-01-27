@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from detect import DetectCars, DetectEngine, Tracker
+from detect import DetectCars, DetectEngine, Tracker, draw_bbox, get_processed_video
 from pathlib import Path
 
 
@@ -43,8 +43,8 @@ if video_bytes and st.button("Start"):
         st.write("Detecting cars in frames...")
         detection.detect_cars_in_frames()
 
-        st.write("Saving processed frames...")
-        video_bytes = detection.get_processed_video()
+        # st.write("Saving processed frames...")
+        # video_bytes = detection.get_processed_video()
 
         status.update(label="Processed", state="complete", expanded=False)
     
@@ -52,17 +52,28 @@ if video_bytes and st.button("Start"):
 
     with st.status("Analysing Video", expanded=True) as status:
         st.write("Tracking individual cars...")
-        tracker = Tracker(frame_rate=detection.fps)
+        tracker = Tracker(hash=detection.video_hash, frame_rate=detection.fps)
         st.write("Analysing directions...")
         tracker.analyse(detection.frames)
-        result_df = tracker.get_analysed_result()
+        analysed_result = tracker.get_analysed_result()
+
+        st.write("Drawing bboxes...")
+        frames = draw_bbox(
+            direction_result=tracker.direction_result,
+            frames=detection.frames, result_df=tracker.result_df
+        )
+        st.write("Saving processed frames...")
+        video_bytes = get_processed_video(
+            frames=frames, fps=detection.fps, size=detection.size
+        )
+        
         status.update(label="Analysed", state="complete", expanded=False)
 
     col1, col2 = st.columns([2, 3])
     with col1:
    
         st.header("Video stats", divider="rainbow")
-        st.table(result_df)
+        st.table(analysed_result)
 
     with col2:
         st.header("Processed video", divider="rainbow")

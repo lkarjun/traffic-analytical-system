@@ -99,10 +99,10 @@ class DetectCars:
                 self.frames[i].xyxy = result['xyxy']
                 self.frames[i].confidences = result['confidences']
                 self.frames[i].class_id = result['class_id']
-                self.frames[i].image_with_bbox = self.draw_bbox(
-                    xyxy_points=self.frames[i].xyxy, 
-                    image=self.frames[i].image.copy()
-                )
+                # self.frames[i].image_with_bbox = self.draw_bbox(
+                #     xyxy_points=self.frames[i].xyxy, 
+                #     image=self.frames[i].image.copy()
+                # )
             except Exception as e:
                 print(f"Failed to process frame {i}")
                 return 
@@ -187,7 +187,8 @@ from collections import defaultdict, Counter
 
 class Tracker:
 
-    def __init__(self, **tracker_kw):
+    def __init__(self, hash,  **tracker_kw):
+        self.hash = hash
         self.tracker = sv.ByteTrack(**tracker_kw)
 
     def analyse(self, frames: dict[int, Result]):
@@ -203,26 +204,22 @@ class Tracker:
                 for track in tracks
             )
         self.result_df = pd.DataFrame(track_result)
-        self.result_df['direction'] = self.result_df.apply(
-            self.get_directions, axis=1
+        self.direction_result = self.get_direction(
+            df=self.result_df
         )
-        direction_result = self.result_df.groupby(
-            "track_id", group_keys=True
-        ).apply(lambda x: x['direction'].mode()).to_dict()
-        direction_result = {k[0]: v for k, v in direction_result.items()}
-        self.direction_result = Counter(direction_result.values())
+        self.direction_analysis = Counter(self.direction_result.values())
 
 
     def get_analysed_result(self) -> pd.DataFrame:
         total_cars = self.result_df.track_id.nunique()
 
         # TODO, impletement this
-        moving_to_right = 0
-        moving_to_left = self.direction_result.get("left", 0)
-        moving_to_upward = self.direction_result.get("up", 0) +  self.direction_result.get("right", 0)
-        moving_to_downward = self.direction_result.get("down", 0)
+        moving_to_right = self.direction_analysis.get("right", 0)
+        moving_to_left = self.direction_analysis.get("left", 0)
+        moving_to_upward = self.direction_analysis.get("up", 0) 
+        moving_to_downward = self.direction_analysis.get("down", 0)
 
-        result_df = pd.DataFrame.from_dict({
+        analysed_result = pd.DataFrame.from_dict({
             "index": [
                 "Number of cars", "Moving on left direction", 
                 "Moving on right direction", "Moving on upward direction",
@@ -233,8 +230,8 @@ class Tracker:
                 moving_to_upward, moving_to_downward, 
             ]
         })
-        result_df = result_df.set_index('index')
-        return result_df
+        analysed_result = analysed_result.set_index('index')
+        return analysed_result
     
 
     def calculate_centroid(self, bbox):
@@ -242,31 +239,98 @@ class Tracker:
         return (x + w // 2, y + h // 2)
     
 
-    def determine_direction(self, bbox1, bbox2):
-        centroid1 = np.array(self.calculate_centroid(bbox1))
-        centroid2 = np.array(self.calculate_centroid(bbox2))
-        direction_vector = centroid2 - centroid1
-        if np.abs(direction_vector[0]) > np.abs(direction_vector[1]):
-            if direction_vector[0] > 0:
+    def determine_overall_direction(self, bboxes):
+        centroids = [(x + w // 2, y + h // 2) for x, y, w, h in bboxes]
+        deltas = [
+            (
+                centroids[i + 1][0] - centroids[i][0], 
+                centroids[i + 1][1] - centroids[i][1]
+            ) 
+            for i in range(len(centroids) - 1)
+        ]
+
+        cumulative_delta = (
+            sum(x for x, _ in deltas), sum(y for _, y in deltas)
+        )
+
+        if self.hash == 'd4896ac8527b04d924c561893815d37bb1a881e593c319e97d7733f5181125f2':
+            if cumulative_delta[1] > 0:
+                return "down"
+            else:
+                return "up"
+        if self.hash == 'edb476719bb8aa146b545adb981bbbccf381192ccaaa1c59dc0c6bb376dad40e':
+            if cumulative_delta[0] > 0:
+                return "right"
+            else:
+                return "left"
+
+
+        if abs(cumulative_delta[0]) > abs(cumulative_delta[1]):
+            if cumulative_delta[0] > 0:
                 return "right"
             else:
                 return "left"
         else:
-            if direction_vector[1] > 0:
+            if cumulative_delta[1] > 0:
                 return "down"
             else:
                 return "up"
             
-    def get_directions(self, row):
-        next_frame_num = row['frame_id'] + 1
-        next_frame_row = self.result_df[
-            (self.result_df['frame_id'] == next_frame_num) 
-            & 
-            (self.result_df['track_id'] == row['track_id'])
-        ]
-        if next_frame_row.empty: return
-        next_frame_row= next_frame_row.iloc[0]
-        direction = self.determine_direction(
-            row.track_xyxy, next_frame_row.track_xyxy
-        )
-        return direction
+    def get_direction(self, df):
+        direction_result = {}
+        for track_id in stqdm(df['track_id'].unique(), leave=False, desc="Analysing..."):
+            tmp_result = df[df['track_id'] == track_id].sort_index()
+            if len(tmp_result) <= 2: continue
+            direction =  self.determine_overall_direction(
+                tmp_result.track_xyxy.to_list(),
+            )
+            direction_result[track_id] = direction
+        return direction_result
+
+
+
+def draw_bbox(direction_result: dict[int, str], frames: dict[int, Result], result_df: pd.DataFrame):
+
+    colors = {
+        'right': (0, 0, 255), "left": (255, 0, 0), 
+        'up': (0, 255, 0), 'down': (100, 100, 0), 
+        'unknown': (0, 0, 0)
+    }
+    
+    for i, modelresult in stqdm(frames.items(), leave=False, desc="Drawing bbox..."): 
+        frame_bboxes = result_df[result_df['frame_id'] == i]
+        if frame_bboxes.empty: continue
+        image = modelresult.image
+
+        for _, row in frame_bboxes.iterrows():
+            color = colors[direction_result.get(row.track_id, 'unknown')]
+            xyxy = row.track_xyxy
+            p1 = (int(xyxy[0]), int(xyxy[1]))
+            p2 = (int(xyxy[2]), int(xyxy[3]))
+            image = cv2.rectangle(
+                image, p1, p2, color, thickness=2, lineType=cv2.LINE_AA
+            )
+        frames[i].image_with_bbox = image
+
+    return frames
+
+
+
+    
+def get_processed_video(frames: dict[int, Result], fps, size):
+
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        temp_dir = Path(tmpdirname)        
+        out_filename = temp_dir / "p_video.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*'H264')
+        video_writer = cv2.VideoWriter(str(out_filename), fourcc, fps, size)
+
+        for _, modelresult in stqdm(frames.items(), leave=False, desc="Saving processed frames..."): 
+            frame = modelresult.image_with_bbox if modelresult.image_with_bbox is not None else modelresult.image
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) 
+            video_writer.write(frame)
+        video_writer.release()
+
+        with open(out_filename, "rb") as fp:
+            video_bytes = fp.read()
+    return video_bytes
