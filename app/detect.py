@@ -221,9 +221,9 @@ class Tracker:
 
         analysed_result = pd.DataFrame.from_dict({
             "index": [
-                "Number of cars", "Moving on left direction", 
-                "Moving on right direction", "Moving on upward direction",
-                "Moving on downward direction"
+                "Number of cars", "Moving in left direction", 
+                "Moving in right direction", "Moving in upward direction",
+                "Moving in downward direction"
             ],
             "values": [
                 total_cars, moving_to_left, moving_to_right, 
@@ -292,8 +292,8 @@ class Tracker:
 def draw_bbox(direction_result: dict[int, str], frames: dict[int, Result], result_df: pd.DataFrame):
 
     colors = {
-        'right': (0, 0, 255), "left": (255, 0, 0), 
-        'up': (0, 255, 0), 'down': (100, 100, 0), 
+        'right': (100, 100, 0), "left": (255, 0, 0), 
+        'up': (0, 255, 0), 'down': (0, 0, 255), 
         'unknown': (0, 0, 0)
     }
     
