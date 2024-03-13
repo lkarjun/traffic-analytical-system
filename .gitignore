@@ -1,1 +1,6 @@
 *.pyc
+*.mp4
+app/cache
+notebooks
+app/model/
+*.ipynb
